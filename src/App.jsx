@@ -12,8 +12,8 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
+import { supabase } from "./supabase";
  
-const STORAGE_KEY = "nido_financiero_app_v2";
 const HOY = new Date().toISOString().split("T")[0];
 const COLORES = ["#0f172a", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1"];
  
@@ -23,41 +23,6 @@ const TIPOS_REPORTE = [
   { value: "mensual", label: "Mensual" },
   { value: "anual", label: "Anual" },
 ];
- 
-const INGRESOS_INICIALES = [
-  { id: 1, descripcion: "Sueldo", monto: 26000, fecha: HOY },
-  { id: 2, descripcion: "Negocio", monto: 12000, fecha: HOY },
-];
- 
-const GASTOS_INICIALES = [
-  { id: 1, descripcion: "Comida", monto: 4000, categoria: "Hogar", fecha: HOY },
-  { id: 2, descripcion: "Combustible", monto: 12000, categoria: "Transporte", fecha: HOY },
-  { id: 3, descripcion: "Universidad", monto: 4500, categoria: "Educación", fecha: HOY },
-];
- 
-const CUENTAS_INICIALES = [
-  { id: 1, nombre: "Billetera", tipo: "Efectivo", saldo: 5000 },
-  { id: 2, nombre: "Banco Popular", tipo: "Banco", saldo: 12000 },
-  { id: 3, nombre: "Reserva de ahorro", tipo: "Ahorro", saldo: 8000 },
-];
- 
-const DEUDAS_INICIALES = [
-  { id: 1, nombre: "Tarjeta principal", saldo: 6500 },
-  { id: 2, nombre: "Préstamo personal", saldo: 15000 },
-];
- 
-const PRESUPUESTOS_INICIALES = [
-  { id: 1, categoria: "Hogar", limite: 10000 },
-  { id: 2, categoria: "Transporte", limite: 15000 },
-];
- 
-const DATOS_USUARIO_INICIALES = {
-  ingresos: INGRESOS_INICIALES,
-  gastos: GASTOS_INICIALES,
-  cuentas: CUENTAS_INICIALES,
-  deudas: DEUDAS_INICIALES,
-  presupuestos: PRESUPUESTOS_INICIALES,
-};
  
 const LOGIN_VACIO = { email: "", password: "" };
 const REGISTRO_VACIO = { nombre: "", email: "", password: "", confirmarPassword: "" };
@@ -75,8 +40,6 @@ const formatoMoneda = (valor) =>
     currency: "DOP",
     maximumFractionDigits: 2,
   }).format(Number(valor) || 0);
- 
-const crearId = () => Date.now() + Math.floor(Math.random() * 10000);
  
 const normalizarFecha = (fecha) => {
   if (!fecha) return HOY;
@@ -96,7 +59,6 @@ const obtenerInicioSemana = (fecha) => {
 const obtenerClavePeriodo = (fecha, tipo) => {
   const fechaNormalizada = normalizarFecha(fecha);
   const [year, month] = fechaNormalizada.split("-");
- 
   if (tipo === "diario") return fechaNormalizada;
   if (tipo === "semanal") return obtenerInicioSemana(fechaNormalizada);
   if (tipo === "mensual") return `${year}-${month}`;
@@ -108,66 +70,13 @@ const filtrarPorPeriodo = (items, tipo, referencia) => {
   return items.filter((item) => obtenerClavePeriodo(item.fecha, tipo) === claveActual);
 };
  
-const totalizarPorCategoria = (gastos) => {
-  const mapa = gastos.reduce((acc, item) => {
+const totalizarPorCategoria = (items) => {
+  const mapa = items.reduce((acc, item) => {
     const categoria = item.categoria || "General";
     acc[categoria] = (acc[categoria] || 0) + (Number(item.monto) || 0);
     return acc;
   }, {});
   return Object.entries(mapa).map(([categoria, monto]) => ({ categoria, monto }));
-};
- 
-const crearEstadoInicial = () => ({
-  users: [
-    {
-      id: 1,
-      nombre: "Administrador",
-      email: "admin",
-      password: "1234",
-      role: "admin",
-      data: DATOS_USUARIO_INICIALES,
-    },
-  ],
-  currentUserId: null,
-});
- 
-const leerEstado = () => {
-  if (typeof window === "undefined") return crearEstadoInicial();
-  const guardado = window.localStorage.getItem(STORAGE_KEY);
-  if (!guardado) return crearEstadoInicial();
- 
-  try {
-    const estado = JSON.parse(guardado);
-    if (!estado?.users?.length) return crearEstadoInicial();
- 
-    return {
-      ...estado,
-      users: estado.users.map((user) => ({
-        ...user,
-        email: user.email || user.username || "",
-        data: {
-          ingresos: (user.data?.ingresos || []).map((item) => ({
-            ...item,
-            fecha: normalizarFecha(item.fecha),
-          })),
-          gastos: (user.data?.gastos || []).map((item) => ({
-            ...item,
-            fecha: normalizarFecha(item.fecha),
-          })),
-          cuentas: user.data?.cuentas || [],
-          deudas: user.data?.deudas || [],
-          presupuestos: user.data?.presupuestos || [],
-        },
-      })),
-    };
-  } catch {
-    return crearEstadoInicial();
-  }
-};
- 
-const guardarEstado = (estado) => {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(estado));
 };
  
 function Campo({ className = "", ...props }) {
@@ -215,12 +124,12 @@ function AuthPanel({
           <p className="text-sm uppercase tracking-[0.2em] text-slate-300">Nido</p>
           <h1 className="mt-4 text-4xl font-bold">Nido Financiero</h1>
           <p className="mt-4 text-slate-300">
-            Sistema de ingresos, gastos, presupuestos, cuentas, deudas y reportes.
+            Sistema en la nube para ingresos, gastos, presupuestos, cuentas, deudas y reportes.
           </p>
           <div className="mt-8 rounded-3xl border border-slate-700 bg-slate-800 p-5">
-            <p className="text-sm text-slate-300">Usuario inicial de prueba</p>
-            <p className="mt-2 font-semibold">Correo: admin</p>
-            <p className="font-semibold">Clave: 1234</p>
+            <p className="text-sm text-slate-300">Acceso con Supabase</p>
+            <p className="mt-2 text-sm">Crea tu usuario con correo y contraseña.</p>
+            <p className="text-sm">Luego entra desde cualquier dispositivo.</p>
           </div>
         </div>
  
@@ -239,7 +148,10 @@ function AuthPanel({
                 value={loginForm.password}
                 onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
               />
-              <button onClick={onLogin} className="rounded-2xl bg-slate-900 px-5 py-3 font-medium text-white hover:opacity-90">
+              <button
+                onClick={onLogin}
+                className="rounded-2xl bg-slate-900 px-5 py-3 font-medium text-white hover:opacity-90"
+              >
                 Entrar
               </button>
             </div>
@@ -293,10 +205,18 @@ function AuthPanel({
 }
  
 export default function PresupuestoWeb() {
-  const [appState, setAppState] = useState(() => leerEstado());
   const [loginForm, setLoginForm] = useState(LOGIN_VACIO);
   const [registerForm, setRegisterForm] = useState(REGISTRO_VACIO);
   const [mensajeAuth, setMensajeAuth] = useState("");
+  const [mensaje, setMensaje] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
+ 
+  const [ingresos, setIngresos] = useState([]);
+  const [gastos, setGastos] = useState([]);
+  const [cuentas, setCuentas] = useState([]);
+  const [deudas, setDeudas] = useState([]);
+  const [presupuestos, setPresupuestos] = useState([]);
+ 
   const [nuevoIngreso, setNuevoIngreso] = useState(INGRESO_VACIO);
   const [nuevoGasto, setNuevoGasto] = useState(GASTO_VACIO);
   const [nuevaCuenta, setNuevaCuenta] = useState(CUENTA_VACIA);
@@ -305,109 +225,8 @@ export default function PresupuestoWeb() {
   const [movimiento, setMovimiento] = useState(MOVIMIENTO_VACIO);
   const [pagoDeuda, setPagoDeuda] = useState(PAGO_DEUDA_VACIO);
   const [filtro, setFiltro] = useState("Todos");
-  const [mensaje, setMensaje] = useState("");
   const [tipoReporte, setTipoReporte] = useState("mensual");
   const [fechaReporte, setFechaReporte] = useState(HOY);
- 
-  useEffect(() => {
-    guardarEstado(appState);
-  }, [appState]);
- 
-  const currentUser = useMemo(
-    () => appState.users.find((user) => user.id === appState.currentUserId) || null,
-    [appState]
-  );
- 
-  const ingresos = currentUser?.data?.ingresos || [];
-  const gastos = currentUser?.data?.gastos || [];
-  const cuentas = currentUser?.data?.cuentas || [];
-  const deudas = currentUser?.data?.deudas || [];
-  const presupuestos = currentUser?.data?.presupuestos || [];
- 
-  const totalIngresos = useMemo(
-    () => ingresos.reduce((acc, item) => acc + (Number(item.monto) || 0), 0),
-    [ingresos]
-  );
- 
-  const totalGastos = useMemo(
-    () => gastos.reduce((acc, item) => acc + (Number(item.monto) || 0), 0),
-    [gastos]
-  );
- 
-  const totalCuentas = useMemo(
-    () => cuentas.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0),
-    [cuentas]
-  );
- 
-  const totalDeudas = useMemo(
-    () => deudas.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0),
-    [deudas]
-  );
- 
-  const balance = useMemo(() => totalIngresos - totalGastos, [totalIngresos, totalGastos]);
-  const patrimonioDisponible = useMemo(() => totalCuentas - totalDeudas, [totalCuentas, totalDeudas]);
- 
-  const categorias = useMemo(
-    () => ["Todos", ...new Set(gastos.map((g) => g.categoria).filter(Boolean))],
-    [gastos]
-  );
- 
-  const gastosFiltrados = useMemo(() => {
-    if (filtro === "Todos") return gastos;
-    return gastos.filter((g) => g.categoria === filtro);
-  }, [gastos, filtro]);
- 
-  const datosCategorias = useMemo(() => totalizarPorCategoria(gastos), [gastos]);
- 
-  const ingresosReporte = useMemo(
-    () => filtrarPorPeriodo(ingresos, tipoReporte, fechaReporte),
-    [ingresos, tipoReporte, fechaReporte]
-  );
- 
-  const gastosReporte = useMemo(
-    () => filtrarPorPeriodo(gastos, tipoReporte, fechaReporte),
-    [gastos, tipoReporte, fechaReporte]
-  );
- 
-  const totalIngresosReporte = useMemo(
-    () => ingresosReporte.reduce((acc, item) => acc + (Number(item.monto) || 0), 0),
-    [ingresosReporte]
-  );
- 
-  const totalGastosReporte = useMemo(
-    () => gastosReporte.reduce((acc, item) => acc + (Number(item.monto) || 0), 0),
-    [gastosReporte]
-  );
- 
-  const balanceReporte = useMemo(
-    () => totalIngresosReporte - totalGastosReporte,
-    [totalIngresosReporte, totalGastosReporte]
-  );
- 
-  const categoriasReporte = useMemo(() => totalizarPorCategoria(gastosReporte), [gastosReporte]);
- 
-  const gastoPorCategoria = useMemo(() => {
-    return gastos.reduce((acc, item) => {
-      const categoria = item.categoria || "General";
-      acc[categoria] = (acc[categoria] || 0) + (Number(item.monto) || 0);
-      return acc;
-    }, {});
-  }, [gastos]);
- 
-  const presupuestosConEstado = useMemo(() => {
-    return presupuestos.map((item) => {
-      const gastado = gastoPorCategoria[item.categoria] || 0;
-      const limite = Number(item.limite) || 0;
-      const disponible = limite - gastado;
-      const porcentaje = limite > 0 ? Math.min((gastado / limite) * 100, 100) : 0;
-      return {
-        ...item,
-        gastado,
-        disponible,
-        porcentaje,
-      };
-    });
-  }, [presupuestos, gastoPorCategoria]);
  
   const mostrarMensaje = (texto) => {
     setMensaje(texto);
@@ -416,22 +235,100 @@ export default function PresupuestoWeb() {
  
   const mostrarMensajeAuth = (texto) => {
     setMensajeAuth(texto);
-    setTimeout(() => setMensajeAuth(""), 3000);
+    setTimeout(() => setMensajeAuth(""), 3500);
   };
  
-  const actualizarDatosUsuario = (updater) => {
-    if (!currentUser) return;
+  const cargarSesionActual = async () => {
+    const { data: authData } = await supabase.auth.getUser();
  
-    setAppState((prev) => ({
-      ...prev,
-      users: prev.users.map((user) => {
-        if (user.id !== prev.currentUserId) return user;
-        return { ...user, data: updater(user.data) };
-      }),
-    }));
+    if (!authData.user) {
+      setCurrentUser(null);
+      setIngresos([]);
+      setGastos([]);
+      setCuentas([]);
+      setDeudas([]);
+      setPresupuestos([]);
+      return;
+    }
+ 
+    const { data: profileData } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", authData.user.id)
+      .single();
+ 
+    setCurrentUser({
+      id: authData.user.id,
+      nombre: profileData?.nombre || authData.user.email,
+      email: authData.user.email,
+    });
   };
  
-  const iniciarSesion = () => {
+  const cargarDatosUsuario = async (userId) => {
+    const [
+      { data: ingresosData, error: ingresosError },
+      { data: gastosData, error: gastosError },
+      { data: cuentasData, error: cuentasError },
+      { data: deudasData, error: deudasError },
+      { data: presupuestosData, error: presupuestosError },
+    ] = await Promise.all([
+      supabase.from("ingresos").select("*").eq("user_id", userId).order("id", { ascending: false }),
+      supabase.from("gastos").select("*").eq("user_id", userId).order("id", { ascending: false }),
+      supabase.from("cuentas").select("*").eq("user_id", userId).order("id", { ascending: false }),
+      supabase.from("deudas").select("*").eq("user_id", userId).order("id", { ascending: false }),
+      supabase
+        .from("presupuestos")
+        .select("*")
+        .eq("user_id", userId)
+        .order("id", { ascending: false }),
+    ]);
+ 
+    const primerError =
+      ingresosError || gastosError || cuentasError || deudasError || presupuestosError;
+ 
+    if (primerError) {
+      mostrarMensaje(primerError.message);
+      return;
+    }
+ 
+    setIngresos((ingresosData || []).map((item) => ({ ...item, fecha: normalizarFecha(item.fecha) })));
+    setGastos((gastosData || []).map((item) => ({ ...item, fecha: normalizarFecha(item.fecha) })));
+    setCuentas(cuentasData || []);
+    setDeudas(deudasData || []);
+    setPresupuestos(presupuestosData || []);
+  };
+ 
+  useEffect(() => {
+    const iniciar = async () => {
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData.user) {
+        await cargarSesionActual();
+        await cargarDatosUsuario(authData.user.id);
+      }
+    };
+ 
+    iniciar();
+ 
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        await cargarSesionActual();
+        await cargarDatosUsuario(session.user.id);
+      } else {
+        setCurrentUser(null);
+        setIngresos([]);
+        setGastos([]);
+        setCuentas([]);
+        setDeudas([]);
+        setPresupuestos([]);
+      }
+    });
+ 
+    return () => {
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+ 
+  const iniciarSesion = async () => {
     const email = loginForm.email.trim();
     const password = loginForm.password;
  
@@ -440,25 +337,27 @@ export default function PresupuestoWeb() {
       return;
     }
  
-    const user = appState.users.find(
-      (item) =>
-        (item.email || "").toLowerCase() === email.toLowerCase() &&
-        item.password === password
-    );
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
  
-    if (!user) {
-      mostrarMensajeAuth("Correo o contraseña incorrectos.");
+    if (error) {
+      mostrarMensajeAuth(error.message);
       return;
     }
  
-    setAppState((prev) => ({ ...prev, currentUserId: user.id }));
-    setLoginForm(LOGIN_VACIO);
-    setFiltro("Todos");
-    setTipoReporte("mensual");
-    setFechaReporte(HOY);
+    if (data.user) {
+      await cargarSesionActual();
+      await cargarDatosUsuario(data.user.id);
+      setLoginForm(LOGIN_VACIO);
+      setFiltro("Todos");
+      setTipoReporte("mensual");
+      setFechaReporte(HOY);
+    }
   };
  
-  const crearUsuario = () => {
+  const crearUsuario = async () => {
     const nombre = registerForm.nombre.trim();
     const email = registerForm.email.trim();
     const password = registerForm.password;
@@ -474,37 +373,41 @@ export default function PresupuestoWeb() {
       return;
     }
  
-    const existe = appState.users.some(
-      (item) => (item.email || "").toLowerCase() === email.toLowerCase()
-    );
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
  
-    if (existe) {
-      mostrarMensajeAuth("Ese correo ya existe.");
+    if (error) {
+      mostrarMensajeAuth(error.message);
       return;
     }
  
-    const nuevoUsuario = {
-      id: crearId(),
-      nombre,
-      email,
-      password,
-      role: "user",
-      data: {
-        ingresos: [],
-        gastos: [],
-        cuentas: [],
-        deudas: [],
-        presupuestos: [],
-      },
-    };
+    if (data.user) {
+      const { error: profileError } = await supabase.from("profiles").upsert({
+        id: data.user.id,
+        nombre,
+        email,
+      });
  
-    setAppState((prev) => ({ ...prev, users: [...prev.users, nuevoUsuario] }));
+      if (profileError) {
+        mostrarMensajeAuth(profileError.message);
+        return;
+      }
+    }
+ 
     setRegisterForm(REGISTRO_VACIO);
-    mostrarMensajeAuth("Usuario creado correctamente. Ya puede iniciar sesión.");
+    mostrarMensajeAuth("Usuario creado correctamente. Si Supabase exige confirmación, revisa tu correo.");
   };
  
-  const cerrarSesion = () => {
-    setAppState((prev) => ({ ...prev, currentUserId: null }));
+  const cerrarSesion = async () => {
+    await supabase.auth.signOut();
+    setCurrentUser(null);
+    setIngresos([]);
+    setGastos([]);
+    setCuentas([]);
+    setDeudas([]);
+    setPresupuestos([]);
     setFiltro("Todos");
     setTipoReporte("mensual");
     setFechaReporte(HOY);
@@ -517,203 +420,283 @@ export default function PresupuestoWeb() {
     setPagoDeuda(PAGO_DEUDA_VACIO);
   };
  
-  const agregarIngreso = () => {
+  const agregarIngreso = async () => {
     const descripcion = nuevoIngreso.descripcion.trim();
     const monto = Number(nuevoIngreso.monto);
  
-    if (!descripcion || monto <= 0 || Number.isNaN(monto)) return;
+    if (!currentUser || !descripcion || monto <= 0 || Number.isNaN(monto)) return;
  
-    actualizarDatosUsuario((data) => ({
-      ...data,
-      ingresos: [...data.ingresos, { id: crearId(), descripcion, monto, fecha: normalizarFecha(nuevoIngreso.fecha) }],
-    }));
+    const { error } = await supabase.from("ingresos").insert({
+      user_id: currentUser.id,
+      descripcion,
+      monto,
+      fecha: normalizarFecha(nuevoIngreso.fecha),
+    });
  
+    if (error) {
+      mostrarMensaje(error.message);
+      return;
+    }
+ 
+    await cargarDatosUsuario(currentUser.id);
     setNuevoIngreso(INGRESO_VACIO);
     mostrarMensaje("Ingreso agregado correctamente.");
   };
  
-  const agregarGasto = () => {
+  const agregarGasto = async () => {
     const descripcion = nuevoGasto.descripcion.trim();
     const categoria = nuevoGasto.categoria.trim() || "General";
     const monto = Number(nuevoGasto.monto);
     const cuentaId = Number(nuevoGasto.cuentaId);
  
-    if (!descripcion || monto <= 0 || Number.isNaN(monto)) return;
+    if (!currentUser || !descripcion || monto <= 0 || Number.isNaN(monto)) return;
  
     const cuenta = cuentaId ? cuentas.find((item) => item.id === cuentaId) : null;
-    if (cuentaId && (!cuenta || cuenta.saldo < monto)) {
+ 
+    if (cuentaId && (!cuenta || Number(cuenta.saldo) < monto)) {
       mostrarMensaje("Fondos insuficientes en la cuenta seleccionada.");
       return;
     }
  
-    actualizarDatosUsuario((data) => ({
-      ...data,
-      gastos: [
-        ...data.gastos,
-        {
-          id: crearId(),
-          descripcion,
-          monto,
-          categoria,
-          cuentaId: cuentaId || null,
-          fecha: normalizarFecha(nuevoGasto.fecha),
-        },
-      ],
-      cuentas: cuentaId
-        ? data.cuentas.map((item) => (item.id === cuentaId ? { ...item, saldo: item.saldo - monto } : item))
-        : data.cuentas,
-    }));
+    const { error: gastoError } = await supabase.from("gastos").insert({
+      user_id: currentUser.id,
+      descripcion,
+      monto,
+      categoria,
+      fecha: normalizarFecha(nuevoGasto.fecha),
+    });
  
+    if (gastoError) {
+      mostrarMensaje(gastoError.message);
+      return;
+    }
+ 
+    if (cuentaId) {
+      const { error: cuentaError } = await supabase
+        .from("cuentas")
+        .update({ saldo: Number(cuenta.saldo) - monto })
+        .eq("id", cuentaId)
+        .eq("user_id", currentUser.id);
+ 
+      if (cuentaError) {
+        mostrarMensaje(cuentaError.message);
+        return;
+      }
+    }
+ 
+    await cargarDatosUsuario(currentUser.id);
     setNuevoGasto(GASTO_VACIO);
     mostrarMensaje("Gasto agregado correctamente.");
   };
  
-  const agregarCuenta = () => {
+  const agregarCuenta = async () => {
     const nombre = nuevaCuenta.nombre.trim();
     const tipo = nuevaCuenta.tipo.trim() || "Banco";
     const saldo = Number(nuevaCuenta.saldo);
  
-    if (!nombre || saldo < 0 || Number.isNaN(saldo)) return;
+    if (!currentUser || !nombre || saldo < 0 || Number.isNaN(saldo)) return;
  
-    actualizarDatosUsuario((data) => ({
-      ...data,
-      cuentas: [...data.cuentas, { id: crearId(), nombre, tipo, saldo }],
-    }));
+    const { error } = await supabase.from("cuentas").insert({
+      user_id: currentUser.id,
+      nombre,
+      tipo,
+      saldo,
+    });
  
+    if (error) {
+      mostrarMensaje(error.message);
+      return;
+    }
+ 
+    await cargarDatosUsuario(currentUser.id);
     setNuevaCuenta(CUENTA_VACIA);
     mostrarMensaje("Cuenta agregada correctamente.");
   };
  
-  const agregarDeuda = () => {
+  const agregarDeuda = async () => {
     const nombre = nuevaDeuda.nombre.trim();
     const saldo = Number(nuevaDeuda.saldo);
  
-    if (!nombre || saldo < 0 || Number.isNaN(saldo)) return;
+    if (!currentUser || !nombre || saldo < 0 || Number.isNaN(saldo)) return;
  
-    actualizarDatosUsuario((data) => ({
-      ...data,
-      deudas: [...data.deudas, { id: crearId(), nombre, saldo }],
-    }));
+    const { error } = await supabase.from("deudas").insert({
+      user_id: currentUser.id,
+      nombre,
+      saldo,
+    });
  
+    if (error) {
+      mostrarMensaje(error.message);
+      return;
+    }
+ 
+    await cargarDatosUsuario(currentUser.id);
     setNuevaDeuda(DEUDA_VACIA);
     mostrarMensaje("Deuda agregada correctamente.");
   };
  
-  const agregarPresupuesto = () => {
+  const agregarPresupuesto = async () => {
     const categoria = nuevoPresupuesto.categoria.trim();
     const limite = Number(nuevoPresupuesto.limite);
  
-    if (!categoria || limite <= 0 || Number.isNaN(limite)) return;
+    if (!currentUser || !categoria || limite <= 0 || Number.isNaN(limite)) return;
  
-    actualizarDatosUsuario((data) => {
-      const existe = data.presupuestos.some(
-        (item) => item.categoria.toLowerCase() === categoria.toLowerCase()
-      );
- 
-      const presupuestosActualizados = existe
-        ? data.presupuestos.map((item) =>
-            item.categoria.toLowerCase() === categoria.toLowerCase() ? { ...item, limite } : item
-          )
-        : [...data.presupuestos, { id: crearId(), categoria, limite }];
- 
-      return {
-        ...data,
-        presupuestos: presupuestosActualizados,
-      };
+    const { error } = await supabase.from("presupuestos").insert({
+      user_id: currentUser.id,
+      categoria,
+      limite,
     });
  
+    if (error) {
+      mostrarMensaje(error.message);
+      return;
+    }
+ 
+    await cargarDatosUsuario(currentUser.id);
     setNuevoPresupuesto(PRESUPUESTO_VACIO);
-    mostrarMensaje("Presupuesto guardado correctamente.");
+    mostrarMensaje("Presupuesto agregado correctamente.");
   };
  
-  const moverDinero = () => {
+  const moverDinero = async () => {
     const origenId = Number(movimiento.origenId);
     const destinoId = Number(movimiento.destinoId);
     const monto = Number(movimiento.monto);
  
-    if (!origenId || !destinoId || origenId === destinoId || monto <= 0 || Number.isNaN(monto)) return;
+    if (!currentUser || !origenId || !destinoId || origenId === destinoId || monto <= 0 || Number.isNaN(monto)) return;
  
     const origen = cuentas.find((item) => item.id === origenId);
-    if (!origen || origen.saldo < monto) {
+    const destino = cuentas.find((item) => item.id === destinoId);
+ 
+    if (!origen || !destino) return;
+ 
+    if (Number(origen.saldo) < monto) {
       mostrarMensaje("La cuenta de origen no tiene fondos suficientes.");
       return;
     }
  
-    actualizarDatosUsuario((data) => ({
-      ...data,
-      cuentas: data.cuentas.map((item) => {
-        if (item.id === origenId) return { ...item, saldo: item.saldo - monto };
-        if (item.id === destinoId) return { ...item, saldo: item.saldo + monto };
-        return item;
-      }),
-    }));
+    const { error: errorOrigen } = await supabase
+      .from("cuentas")
+      .update({ saldo: Number(origen.saldo) - monto })
+      .eq("id", origenId)
+      .eq("user_id", currentUser.id);
  
+    if (errorOrigen) {
+      mostrarMensaje(errorOrigen.message);
+      return;
+    }
+ 
+    const { error: errorDestino } = await supabase
+      .from("cuentas")
+      .update({ saldo: Number(destino.saldo) + monto })
+      .eq("id", destinoId)
+      .eq("user_id", currentUser.id);
+ 
+    if (errorDestino) {
+      mostrarMensaje(errorDestino.message);
+      return;
+    }
+ 
+    await cargarDatosUsuario(currentUser.id);
     setMovimiento(MOVIMIENTO_VACIO);
     mostrarMensaje("Movimiento realizado correctamente.");
   };
  
-  const pagarDeudaDesdeCuenta = () => {
+  const pagarDeudaDesdeCuenta = async () => {
     const cuentaId = Number(pagoDeuda.cuentaId);
     const deudaId = Number(pagoDeuda.deudaId);
     const monto = Number(pagoDeuda.monto);
  
-    if (!cuentaId || !deudaId || monto <= 0 || Number.isNaN(monto)) return;
+    if (!currentUser || !cuentaId || !deudaId || monto <= 0 || Number.isNaN(monto)) return;
  
     const cuenta = cuentas.find((item) => item.id === cuentaId);
     const deuda = deudas.find((item) => item.id === deudaId);
  
     if (!cuenta || !deuda) return;
-    if (cuenta.saldo < monto) {
+ 
+    if (Number(cuenta.saldo) < monto) {
       mostrarMensaje("La cuenta seleccionada no tiene fondos suficientes.");
       return;
     }
  
-    actualizarDatosUsuario((data) => ({
-      ...data,
-      cuentas: data.cuentas.map((item) => (item.id === cuentaId ? { ...item, saldo: item.saldo - monto } : item)),
-      deudas: data.deudas.map((item) =>
-        item.id === deudaId ? { ...item, saldo: Math.max(0, item.saldo - monto) } : item
-      ),
-    }));
+    const { error: errorCuenta } = await supabase
+      .from("cuentas")
+      .update({ saldo: Number(cuenta.saldo) - monto })
+      .eq("id", cuentaId)
+      .eq("user_id", currentUser.id);
  
+    if (errorCuenta) {
+      mostrarMensaje(errorCuenta.message);
+      return;
+    }
+ 
+    const { error: errorDeuda } = await supabase
+      .from("deudas")
+      .update({ saldo: Math.max(0, Number(deuda.saldo) - monto) })
+      .eq("id", deudaId)
+      .eq("user_id", currentUser.id);
+ 
+    if (errorDeuda) {
+      mostrarMensaje(errorDeuda.message);
+      return;
+    }
+ 
+    await cargarDatosUsuario(currentUser.id);
     setPagoDeuda(PAGO_DEUDA_VACIO);
     mostrarMensaje("Pago aplicado correctamente a la deuda.");
   };
  
-  const eliminarIngreso = (id) => {
-    actualizarDatosUsuario((data) => ({
-      ...data,
-      ingresos: data.ingresos.filter((item) => item.id !== id),
-    }));
+  const eliminarIngreso = async (id) => {
+    if (!currentUser) return;
+    const { error } = await supabase.from("ingresos").delete().eq("id", id).eq("user_id", currentUser.id);
+    if (error) return mostrarMensaje(error.message);
+    await cargarDatosUsuario(currentUser.id);
   };
  
-  const eliminarGasto = (id) => {
-    actualizarDatosUsuario((data) => ({
-      ...data,
-      gastos: data.gastos.filter((item) => item.id !== id),
-    }));
+  const eliminarGasto = async (id) => {
+    if (!currentUser) return;
+    const { error } = await supabase.from("gastos").delete().eq("id", id).eq("user_id", currentUser.id);
+    if (error) return mostrarMensaje(error.message);
+    await cargarDatosUsuario(currentUser.id);
   };
  
-  const eliminarCuenta = (id) => {
-    actualizarDatosUsuario((data) => ({
-      ...data,
-      cuentas: data.cuentas.filter((item) => item.id !== id),
-    }));
+  const eliminarCuenta = async (id) => {
+    if (!currentUser) return;
+    const { error } = await supabase.from("cuentas").delete().eq("id", id).eq("user_id", currentUser.id);
+    if (error) return mostrarMensaje(error.message);
+    await cargarDatosUsuario(currentUser.id);
   };
  
-  const eliminarDeuda = (id) => {
-    actualizarDatosUsuario((data) => ({
-      ...data,
-      deudas: data.deudas.filter((item) => item.id !== id),
-    }));
+  const eliminarDeuda = async (id) => {
+    if (!currentUser) return;
+    const { error } = await supabase.from("deudas").delete().eq("id", id).eq("user_id", currentUser.id);
+    if (error) return mostrarMensaje(error.message);
+    await cargarDatosUsuario(currentUser.id);
   };
  
-  const eliminarPresupuesto = (id) => {
-    actualizarDatosUsuario((data) => ({
-      ...data,
-      presupuestos: data.presupuestos.filter((item) => item.id !== id),
-    }));
+  const eliminarPresupuesto = async (id) => {
+    if (!currentUser) return;
+    const { error } = await supabase.from("presupuestos").delete().eq("id", id).eq("user_id", currentUser.id);
+    if (error) return mostrarMensaje(error.message);
+    await cargarDatosUsuario(currentUser.id);
   };
+ 
+  const totalIngresos = useMemo(() => ingresos.reduce((acc, item) => acc + (Number(item.monto) || 0), 0), [ingresos]);
+  const totalGastos = useMemo(() => gastos.reduce((acc, item) => acc + (Number(item.monto) || 0), 0), [gastos]);
+  const totalCuentas = useMemo(() => cuentas.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0), [cuentas]);
+  const totalDeudas = useMemo(() => deudas.reduce((acc, item) => acc + (Number(item.saldo) || 0), 0), [deudas]);
+  const balance = useMemo(() => totalIngresos - totalGastos, [totalIngresos, totalGastos]);
+  const patrimonioDisponible = useMemo(() => totalCuentas - totalDeudas, [totalCuentas, totalDeudas]);
+ 
+  const categorias = useMemo(() => ["Todos", ...new Set(gastos.map((g) => g.categoria).filter(Boolean))], [gastos]);
+  const gastosFiltrados = useMemo(() => (filtro === "Todos" ? gastos : gastos.filter((g) => g.categoria === filtro)), [gastos, filtro]);
+  const datosCategorias = useMemo(() => totalizarPorCategoria(gastos), [gastos]);
+ 
+  const ingresosReporte = useMemo(() => filtrarPorPeriodo(ingresos, tipoReporte, fechaReporte), [ingresos, tipoReporte, fechaReporte]);
+  const gastosReporte = useMemo(() => filtrarPorPeriodo(gastos, tipoReporte, fechaReporte), [gastos, tipoReporte, fechaReporte]);
+  const totalIngresosReporte = useMemo(() => ingresosReporte.reduce((acc, item) => acc + (Number(item.monto) || 0), 0), [ingresosReporte]);
+  const totalGastosReporte = useMemo(() => gastosReporte.reduce((acc, item) => acc + (Number(item.monto) || 0), 0), [gastosReporte]);
+  const balanceReporte = useMemo(() => totalIngresosReporte - totalGastosReporte, [totalIngresosReporte, totalGastosReporte]);
+  const categoriasReporte = useMemo(() => totalizarPorCategoria(gastosReporte), [gastosReporte]);
  
   if (!currentUser) {
     return (
@@ -751,7 +734,9 @@ export default function PresupuestoWeb() {
             </button>
           </div>
           {mensaje ? (
-            <div className="mt-4 rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-700">{mensaje}</div>
+            <div className="mt-4 rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-700">
+              {mensaje}
+            </div>
           ) : null}
         </div>
  
@@ -943,42 +928,6 @@ export default function PresupuestoWeb() {
         <div className="grid gap-6 xl:grid-cols-2">
           <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div>
-              <h3 className="text-xl font-semibold text-slate-900">Presupuesto por categoría</h3>
-              <p className="text-sm text-slate-500">Define límites y compara lo gastado en cada categoría.</p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <Campo placeholder="Categoría" value={nuevoPresupuesto.categoria} onChange={(e) => setNuevoPresupuesto((prev) => ({ ...prev, categoria: e.target.value }))} />
-              <Campo type="number" min="0" step="0.01" placeholder="Límite" value={nuevoPresupuesto.limite} onChange={(e) => setNuevoPresupuesto((prev) => ({ ...prev, limite: e.target.value }))} />
-            </div>
-            <button onClick={agregarPresupuesto} className="rounded-2xl bg-slate-900 px-5 py-3 font-medium text-white hover:opacity-90">Guardar presupuesto</button>
-            <div className="space-y-3 pt-2">
-              {presupuestosConEstado.map((item) => (
-                <div key={item.id} className="rounded-2xl border border-slate-200 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-slate-900">{item.categoria}</p>
-                      <p className="text-sm text-slate-500">
-                        Límite {formatoMoneda(item.limite)} · Gastado {formatoMoneda(item.gastado)} · Disponible {formatoMoneda(item.disponible)}
-                      </p>
-                    </div>
-                    <button onClick={() => eliminarPresupuesto(item.id)} className="rounded-xl border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50">Eliminar</button>
-                  </div>
-                  <div className="mt-3 h-3 rounded-full bg-slate-200">
-                    <div
-                      className={`h-3 rounded-full ${item.gastado > item.limite ? "bg-red-500" : "bg-emerald-500"}`}
-                      style={{ width: `${item.porcentaje}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-              {!presupuestosConEstado.length ? (
-                <p className="text-sm text-slate-500">Aún no hay presupuestos creados.</p>
-              ) : null}
-            </div>
-          </div>
- 
-          <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div>
               <h3 className="text-xl font-semibold text-slate-900">Cuentas y billeteras</h3>
               <p className="text-sm text-slate-500">Agrega efectivo, bancos, ahorros o cualquier cartera.</p>
             </div>
@@ -1000,9 +949,7 @@ export default function PresupuestoWeb() {
               ))}
             </div>
           </div>
-        </div>
  
-        <div className="grid gap-6 xl:grid-cols-2">
           <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div>
               <h3 className="text-xl font-semibold text-slate-900">Deudas</h3>
@@ -1025,28 +972,55 @@ export default function PresupuestoWeb() {
               ))}
             </div>
           </div>
+        </div>
+ 
+        <div className="grid gap-6 xl:grid-cols-2">
+          <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div>
+              <h3 className="text-xl font-semibold text-slate-900">Presupuestos</h3>
+              <p className="text-sm text-slate-500">Define límites por categoría para controlar tus gastos.</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <Campo placeholder="Categoría" value={nuevoPresupuesto.categoria} onChange={(e) => setNuevoPresupuesto((prev) => ({ ...prev, categoria: e.target.value }))} />
+              <Campo type="number" min="0" step="0.01" placeholder="Límite" value={nuevoPresupuesto.limite} onChange={(e) => setNuevoPresupuesto((prev) => ({ ...prev, limite: e.target.value }))} />
+            </div>
+            <button onClick={agregarPresupuesto} className="rounded-2xl bg-slate-900 px-5 py-3 font-medium text-white hover:opacity-90">Guardar presupuesto</button>
+            <div className="space-y-3 pt-2">
+              {presupuestos.map((item) => (
+                <div key={item.id} className="flex items-center justify-between rounded-2xl border border-slate-200 p-4">
+                  <div>
+                    <p className="font-medium text-slate-900">{item.categoria}</p>
+                    <p className="text-sm text-slate-500">Límite · {formatoMoneda(item.limite)}</p>
+                  </div>
+                  <button onClick={() => eliminarPresupuesto(item.id)} className="rounded-xl border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50">Eliminar</button>
+                </div>
+              ))}
+            </div>
+          </div>
  
           <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div>
-              <h3 className="text-xl font-semibold text-slate-900">Pagar deuda desde una cuenta</h3>
-              <p className="text-sm text-slate-500">Se descuenta de la cuenta y se acredita a la deuda reduciendo su saldo.</p>
+              <h3 className="text-xl font-semibold text-slate-900">Control de presupuesto</h3>
+              <p className="text-sm text-slate-500">Compara el gasto acumulado con el límite definido.</p>
             </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              <Select value={pagoDeuda.cuentaId} onChange={(e) => setPagoDeuda((prev) => ({ ...prev, cuentaId: e.target.value }))}>
-                <option value="">Cuenta</option>
-                {cuentas.map((cuenta) => (
-                  <option key={cuenta.id} value={cuenta.id}>{cuenta.nombre}</option>
-                ))}
-              </Select>
-              <Select value={pagoDeuda.deudaId} onChange={(e) => setPagoDeuda((prev) => ({ ...prev, deudaId: e.target.value }))}>
-                <option value="">Deuda</option>
-                {deudas.map((deuda) => (
-                  <option key={deuda.id} value={deuda.id}>{deuda.nombre}</option>
-                ))}
-              </Select>
-              <Campo type="number" min="0" step="0.01" placeholder="Monto" value={pagoDeuda.monto} onChange={(e) => setPagoDeuda((prev) => ({ ...prev, monto: e.target.value }))} />
+            <div className="space-y-3">
+              {presupuestos.length ? presupuestos.map((presupuesto) => {
+                const gastado = gastos
+                  .filter((g) => (g.categoria || "General") === presupuesto.categoria)
+                  .reduce((acc, item) => acc + (Number(item.monto) || 0), 0);
+                const disponible = Number(presupuesto.limite) - gastado;
+                return (
+                  <div key={presupuesto.id} className="rounded-2xl border border-slate-200 p-4">
+                    <p className="font-medium text-slate-900">{presupuesto.categoria}</p>
+                    <p className="text-sm text-slate-500">Límite: {formatoMoneda(presupuesto.limite)}</p>
+                    <p className="text-sm text-slate-500">Gastado: {formatoMoneda(gastado)}</p>
+                    <p className={`text-sm font-medium ${disponible >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                      Disponible: {formatoMoneda(disponible)}
+                    </p>
+                  </div>
+                );
+              }) : <p className="text-sm text-slate-500">Aún no hay presupuestos registrados.</p>}
             </div>
-            <button onClick={pagarDeudaDesdeCuenta} className="rounded-2xl bg-slate-900 px-5 py-3 font-medium text-white hover:opacity-90">Aplicar pago</button>
           </div>
         </div>
  
@@ -1059,32 +1033,48 @@ export default function PresupuestoWeb() {
             <div className="grid gap-3 md:grid-cols-3">
               <Select value={movimiento.origenId} onChange={(e) => setMovimiento((prev) => ({ ...prev, origenId: e.target.value }))}>
                 <option value="">Cuenta origen</option>
-                {cuentas.map((cuenta) => (
-                  <option key={cuenta.id} value={cuenta.id}>{cuenta.nombre}</option>
-                ))}
+                {cuentas.map((cuenta) => <option key={cuenta.id} value={cuenta.id}>{cuenta.nombre}</option>)}
               </Select>
               <Select value={movimiento.destinoId} onChange={(e) => setMovimiento((prev) => ({ ...prev, destinoId: e.target.value }))}>
                 <option value="">Cuenta destino</option>
-                {cuentas.map((cuenta) => (
-                  <option key={cuenta.id} value={cuenta.id}>{cuenta.nombre}</option>
-                ))}
+                {cuentas.map((cuenta) => <option key={cuenta.id} value={cuenta.id}>{cuenta.nombre}</option>)}
               </Select>
               <Campo type="number" min="0" step="0.01" placeholder="Monto" value={movimiento.monto} onChange={(e) => setMovimiento((prev) => ({ ...prev, monto: e.target.value }))} />
             </div>
             <button onClick={moverDinero} className="rounded-2xl bg-slate-900 px-5 py-3 font-medium text-white hover:opacity-90">Transferir monto</button>
           </div>
  
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-xl font-semibold text-slate-900">Resumen general</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <TarjetaResumen titulo="Cantidad de ingresos" valor={String(ingresos.length)} />
-              <TarjetaResumen titulo="Cantidad de gastos" valor={String(gastos.length)} />
-              <TarjetaResumen titulo="Cantidad de cuentas" valor={String(cuentas.length)} />
-              <TarjetaResumen titulo="Patrimonio disponible" valor={formatoMoneda(patrimonioDisponible)} color={patrimonioDisponible >= 0 ? "text-emerald-600" : "text-red-600"} />
+          <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div>
+              <h3 className="text-xl font-semibold text-slate-900">Pagar deuda desde una cuenta</h3>
+              <p className="text-sm text-slate-500">Se descuenta de la cuenta y se reduce la deuda.</p>
             </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <Select value={pagoDeuda.cuentaId} onChange={(e) => setPagoDeuda((prev) => ({ ...prev, cuentaId: e.target.value }))}>
+                <option value="">Cuenta</option>
+                {cuentas.map((cuenta) => <option key={cuenta.id} value={cuenta.id}>{cuenta.nombre}</option>)}
+              </Select>
+              <Select value={pagoDeuda.deudaId} onChange={(e) => setPagoDeuda((prev) => ({ ...prev, deudaId: e.target.value }))}>
+                <option value="">Deuda</option>
+                {deudas.map((deuda) => <option key={deuda.id} value={deuda.id}>{deuda.nombre}</option>)}
+              </Select>
+              <Campo type="number" min="0" step="0.01" placeholder="Monto" value={pagoDeuda.monto} onChange={(e) => setPagoDeuda((prev) => ({ ...prev, monto: e.target.value }))} />
+            </div>
+            <button onClick={pagarDeudaDesdeCuenta} className="rounded-2xl bg-slate-900 px-5 py-3 font-medium text-white hover:opacity-90">Aplicar pago</button>
+          </div>
+        </div>
+ 
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-xl font-semibold text-slate-900">Resumen general</h3>
+          <div className="mt-4 grid gap-4 md:grid-cols-4">
+            <TarjetaResumen titulo="Cantidad de ingresos" valor={String(ingresos.length)} />
+            <TarjetaResumen titulo="Cantidad de gastos" valor={String(gastos.length)} />
+            <TarjetaResumen titulo="Cantidad de cuentas" valor={String(cuentas.length)} />
+            <TarjetaResumen titulo="Patrimonio disponible" valor={formatoMoneda(patrimonioDisponible)} color={patrimonioDisponible >= 0 ? "text-emerald-600" : "text-red-600"} />
           </div>
         </div>
       </div>
     </div>
   );
 }
+
