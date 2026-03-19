@@ -237,39 +237,46 @@ export default function App() {
     setPresupuestos(presupuestosData || []);
   };
 
-  useEffect(() => {
-    const iniciar = async () => {
-      const { data, error } = await supabase.auth.getSession();
+useEffect(() => {
+  const iniciar = async () => {
+    const { data, error } = await supabase.auth.getSession();
 
-      if (error) {
-        console.error(error);
-        limpiarDatos();
-        return;
-      }
+    console.log("SESSION DATA:", data);
+    console.log("SESSION ERROR:", error);
 
-      const session = data?.session;
+    const session = data?.session;
 
-      if (session?.user) {
-        await cargarDatosUsuario(session.user.id, session.user);
-      } else {
-        limpiarDatos();
-      }
-    };
+    if (session?.user) {
+      setCurrentUser({
+        id: session.user.id,
+        nombre: session.user.user_metadata?.nombre || session.user.email,
+        email: session.user.email,
+      });
+    } else {
+      limpiarDatos();
+    }
+  };
 
-    iniciar();
+  iniciar();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        await cargarDatosUsuario(session.user.id, session.user);
-      } else {
-        limpiarDatos();
-      }
-    });
+  const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    console.log("AUTH CHANGE:", session);
 
-    return () => {
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
+    if (session?.user) {
+      setCurrentUser({
+        id: session.user.id,
+        nombre: session.user.user_metadata?.nombre || session.user.email,
+        email: session.user.email,
+      });
+    } else {
+      limpiarDatos();
+    }
+  });
+
+  return () => {
+    authListener.subscription.unsubscribe();
+  };
+}, []);
 
   const totalIngresos = useMemo(
     () => ingresos.reduce((acc, item) => acc + (Number(item.monto) || 0), 0),
@@ -327,30 +334,37 @@ export default function App() {
   };
 
   const iniciarSesion = async () => {
-    const email = loginForm.email.trim();
-    const password = loginForm.password;
+  const email = loginForm.email.trim();
+  const password = loginForm.password;
 
-    if (!email || !password) {
-      mostrarMensajeAuth("Completa correo y contraseña.");
-      return;
-    }
+  if (!email || !password) {
+    mostrarMensajeAuth("Completa correo y contraseña.");
+    return;
+  }
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  console.log("LOGIN DATA:", data);
+  console.log("LOGIN ERROR:", error);
+
+  if (error) {
+    mostrarMensajeAuth(error.message);
+    return;
+  }
+
+  if (data?.user) {
+    setCurrentUser({
+      id: data.user.id,
+      nombre: data.user.user_metadata?.nombre || data.user.email,
+      email: data.user.email,
     });
-
-    if (error) {
-      mostrarMensajeAuth(error.message);
-      return;
-    }
-
-    if (data?.user) {
-      await cargarDatosUsuario(data.user.id, data.user);
-      setLoginForm(LOGIN_VACIO);
-      mostrarMensajeAuth("");
-    }
-  };
+    setLoginForm(LOGIN_VACIO);
+    mostrarMensajeAuth("Acceso correcto.");
+  }
+};
 
   const cerrarSesion = async () => {
     await supabase.auth.signOut();
