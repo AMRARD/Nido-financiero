@@ -206,32 +206,32 @@ export default function PresupuestoWeb() {
     setTimeout(() => setMensajeAuth(""), 3000);
   };
 
-  const cargarSesionActual = async () => {
-    const { data: authData } = await supabase.auth.getUser();
+const cargarSesionActual = async () => {
+  const { data: authData } = await supabase.auth.getUser();
+  const user = authData?.user;
 
-    if (!authData.user) {
-      setCurrentUser(null);
-      setIngresos([]);
-      setGastos([]);
-      setCuentas([]);
-      setDeudas([]);
-      setPresupuestos([]);
-      return;
-    }
+  if (!user) {
+    setCurrentUser(null);
+    setIngresos([]);
+    setGastos([]);
+    setCuentas([]);
+    setDeudas([]);
+    setPresupuestos([]);
+    return;
+  }
 
-    const { data: profileData } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", authData.user.id)
-      .single();
+  const { data: profileData } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .maybeSingle();
 
-    setCurrentUser({
-      id: authData.user.id,
-      nombre: profileData?.nombre || authData.user.email,
-      email: authData.user.email,
-    });
-  };
-
+  setCurrentUser({
+    id: user.id,
+    nombre: profileData?.nombre || user.user_metadata?.nombre || user.email,
+    email: user.email,
+  });
+};
   const cargarDatosUsuario = async (userId) => {
     const [{ data: ingresosData }, { data: gastosData }, { data: cuentasData }, { data: deudasData }, { data: presupuestosData }] =
       await Promise.all([
@@ -305,84 +305,65 @@ export default function PresupuestoWeb() {
   const balanceReporte = useMemo(() => totalIngresosReporte - totalGastosReporte, [totalIngresosReporte, totalGastosReporte]);
   const categoriasReporte = useMemo(() => totalizarPorCategoria(gastosReporte), [gastosReporte]);
 
-  const crearUsuario = async () => {
-    const nombre = registerForm.nombre.trim();
-    const email = registerForm.email.trim();
-    const password = registerForm.password;
-    const confirmarPassword = registerForm.confirmarPassword;
+const crearUsuario = async () => {
+  const nombre = registerForm.nombre.trim();
+  const email = registerForm.email.trim();
+  const password = registerForm.password;
+  const confirmarPassword = registerForm.confirmarPassword;
 
-    if (!nombre || !email || !password || !confirmarPassword) {
-      mostrarMensajeAuth("Completa todos los campos del nuevo usuario.");
-      return;
+  if (!nombre || !email || !password || !confirmarPassword) {
+    mostrarMensajeAuth("Completa todos los campos del nuevo usuario.");
+    return;
+  }
+
+  if (password !== confirmarPassword) {
+    mostrarMensajeAuth("Las contraseñas no coinciden.");
+    return;
+  }
+
+  const { error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: { nombre }
     }
+  });
 
-    if (password !== confirmarPassword) {
-      mostrarMensajeAuth("Las contraseñas no coinciden.");
-      return;
-    }
+  if (error) {
+    mostrarMensajeAuth(error.message);
+    return;
+  }
 
-    const { data, error } = await supabase.auth.signUp({ email, password });
+  setRegisterForm(REGISTRO_VACIO);
+  mostrarMensajeAuth("Usuario creado correctamente. Ahora inicia sesión.");
+};
 
-    if (error) {
-      mostrarMensajeAuth(error.message);
-      return;
-    }
+const iniciarSesion = async () => {
+  const email = loginForm.email.trim();
+  const password = loginForm.password;
 
-    if (data.user) {
-      const { error: profileError } = await supabase.from("profiles").insert({
-        id: data.user.id,
-        nombre,
-        email,
-      });
+  if (!email || !password) {
+    mostrarMensajeAuth("Completa correo y contraseña.");
+    return;
+  }
 
-      if (profileError) {
-        mostrarMensajeAuth(profileError.message);
-        return;
-      }
-    }
+  const { error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
 
-    setRegisterForm(REGISTRO_VACIO);
-    mostrarMensajeAuth("Usuario creado correctamente.");
-  };
+  if (error) {
+    mostrarMensajeAuth(error.message);
+    return;
+  }
 
-  const iniciarSesion = async () => {
-    const email = loginForm.email.trim();
-    const password = loginForm.password;
+  window.location.reload();
+};
 
-    if (!email || !password) {
-      mostrarMensajeAuth("Completa correo y contraseña.");
-      return;
-    }
-
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-
-    if (error) {
-      mostrarMensajeAuth(error.message);
-      return;
-    }
-
-    if (data.user) {
-      await cargarSesionActual();
-      await cargarDatosUsuario(data.user.id);
-      setLoginForm(LOGIN_VACIO);
-      setFiltro("Todos");
-      setTipoReporte("mensual");
-      setFechaReporte(HOY);
-    }
-  };
-
-  const cerrarSesion = async () => {
-    await supabase.auth.signOut();
-    setCurrentUser(null);
-    setIngresos([]);
-    setGastos([]);
-    setCuentas([]);
-    setDeudas([]);
-    setPresupuestos([]);
-    setFiltro("Todos");
-    setTipoReporte("mensual");
-    setFechaReporte(HOY);
-  };
+const cerrarSesion = async () => {
+  await supabase.auth.signOut();
+  window.location.reload();
+};
 
   const agregarIngreso = async () => {
     const descripcion = nuevoIngreso.descripcion.trim();
