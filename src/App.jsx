@@ -237,46 +237,39 @@ export default function App() {
     setPresupuestos(presupuestosData || []);
   };
 
-useEffect(() => {
-  const iniciar = async () => {
-    const { data, error } = await supabase.auth.getSession();
+  useEffect(() => {
+    const iniciar = async () => {
+      const { data, error } = await supabase.auth.getSession();
 
-    console.log("SESSION DATA:", data);
-    console.log("SESSION ERROR:", error);
+      if (error) {
+        console.error(error);
+        limpiarDatos();
+        return;
+      }
 
-    const session = data?.session;
+      const session = data?.session;
 
-    if (session?.user) {
-      setCurrentUser({
-        id: session.user.id,
-        nombre: session.user.user_metadata?.nombre || session.user.email,
-        email: session.user.email,
-      });
-    } else {
-      limpiarDatos();
-    }
-  };
+      if (session?.user) {
+        await cargarDatosUsuario(session.user.id, session.user);
+      } else {
+        limpiarDatos();
+      }
+    };
 
-  iniciar();
+    iniciar();
 
-  const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-    console.log("AUTH CHANGE:", session);
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        await cargarDatosUsuario(session.user.id, session.user);
+      } else {
+        limpiarDatos();
+      }
+    });
 
-    if (session?.user) {
-      setCurrentUser({
-        id: session.user.id,
-        nombre: session.user.user_metadata?.nombre || session.user.email,
-        email: session.user.email,
-      });
-    } else {
-      limpiarDatos();
-    }
-  });
-
-  return () => {
-    authListener.subscription.unsubscribe();
-  };
-}, []);
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
 
   const totalIngresos = useMemo(
     () => ingresos.reduce((acc, item) => acc + (Number(item.monto) || 0), 0),
@@ -334,37 +327,30 @@ useEffect(() => {
   };
 
   const iniciarSesion = async () => {
-  const email = loginForm.email.trim();
-  const password = loginForm.password;
+    const email = loginForm.email.trim();
+    const password = loginForm.password;
 
-  if (!email || !password) {
-    mostrarMensajeAuth("Completa correo y contraseña.");
-    return;
-  }
+    if (!email || !password) {
+      mostrarMensajeAuth("Completa correo y contraseña.");
+      return;
+    }
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
-
-  console.log("LOGIN DATA:", data);
-  console.log("LOGIN ERROR:", error);
-
-  if (error) {
-    mostrarMensajeAuth(error.message);
-    return;
-  }
-
-  if (data?.user) {
-    setCurrentUser({
-      id: data.user.id,
-      nombre: data.user.user_metadata?.nombre || data.user.email,
-      email: data.user.email,
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
     });
-    setLoginForm(LOGIN_VACIO);
-    mostrarMensajeAuth("Acceso correcto.");
-  }
-};
+
+    if (error) {
+      mostrarMensajeAuth(error.message);
+      return;
+    }
+
+    if (data?.user) {
+      await cargarDatosUsuario(data.user.id, data.user);
+      setLoginForm(LOGIN_VACIO);
+      mostrarMensajeAuth("");
+    }
+  };
 
   const cerrarSesion = async () => {
     await supabase.auth.signOut();
@@ -372,25 +358,35 @@ useEffect(() => {
   };
 
   const agregarIngreso = async () => {
-    if (!currentUser) return;
+    if (!currentUser?.id) {
+      mostrarMensaje("No hay sesión activa.");
+      return;
+    }
 
     const descripcion = nuevoIngreso.descripcion.trim();
     const monto = Number(nuevoIngreso.monto);
 
-    if (!descripcion || monto <= 0 || Number.isNaN(monto)) {
+    if (!descripcion || Number.isNaN(monto) || monto <= 0) {
       mostrarMensaje("Completa bien el ingreso.");
       return;
     }
 
-    const { error } = await supabase.from("ingresos").insert({
-      user_id: currentUser.id,
-      descripcion,
-      monto,
-      fecha: nuevoIngreso.fecha || HOY,
-    });
+    const { data, error } = await supabase
+      .from("ingresos")
+      .insert([
+        {
+          user_id: currentUser.id,
+          descripcion,
+          monto,
+          fecha: nuevoIngreso.fecha || HOY,
+        },
+      ])
+      .select();
+
+    console.log("INGRESO", { data, error });
 
     if (error) {
-      mostrarMensaje(error.message);
+      mostrarMensaje(`Error ingreso: ${error.message}`);
       return;
     }
 
@@ -400,27 +396,37 @@ useEffect(() => {
   };
 
   const agregarGasto = async () => {
-    if (!currentUser) return;
+    if (!currentUser?.id) {
+      mostrarMensaje("No hay sesión activa.");
+      return;
+    }
 
     const descripcion = nuevoGasto.descripcion.trim();
     const monto = Number(nuevoGasto.monto);
     const categoria = nuevoGasto.categoria.trim() || "General";
 
-    if (!descripcion || monto <= 0 || Number.isNaN(monto)) {
+    if (!descripcion || Number.isNaN(monto) || monto <= 0) {
       mostrarMensaje("Completa bien el gasto.");
       return;
     }
 
-    const { error } = await supabase.from("gastos").insert({
-      user_id: currentUser.id,
-      descripcion,
-      monto,
-      categoria,
-      fecha: nuevoGasto.fecha || HOY,
-    });
+    const { data, error } = await supabase
+      .from("gastos")
+      .insert([
+        {
+          user_id: currentUser.id,
+          descripcion,
+          monto,
+          categoria,
+          fecha: nuevoGasto.fecha || HOY,
+        },
+      ])
+      .select();
+
+    console.log("GASTO", { data, error });
 
     if (error) {
-      mostrarMensaje(error.message);
+      mostrarMensaje(`Error gasto: ${error.message}`);
       return;
     }
 
@@ -430,26 +436,36 @@ useEffect(() => {
   };
 
   const agregarCuenta = async () => {
-    if (!currentUser) return;
+    if (!currentUser?.id) {
+      mostrarMensaje("No hay sesión activa.");
+      return;
+    }
 
     const nombre = nuevaCuenta.nombre.trim();
     const tipo = nuevaCuenta.tipo.trim() || "Banco";
     const saldo = Number(nuevaCuenta.saldo);
 
-    if (!nombre || saldo < 0 || Number.isNaN(saldo)) {
+    if (!nombre || Number.isNaN(saldo) || saldo < 0) {
       mostrarMensaje("Completa bien la cuenta.");
       return;
     }
 
-    const { error } = await supabase.from("cuentas").insert({
-      user_id: currentUser.id,
-      nombre,
-      tipo,
-      saldo,
-    });
+    const { data, error } = await supabase
+      .from("cuentas")
+      .insert([
+        {
+          user_id: currentUser.id,
+          nombre,
+          tipo,
+          saldo,
+        },
+      ])
+      .select();
+
+    console.log("CUENTA", { data, error });
 
     if (error) {
-      mostrarMensaje(error.message);
+      mostrarMensaje(`Error cuenta: ${error.message}`);
       return;
     }
 
@@ -459,24 +475,34 @@ useEffect(() => {
   };
 
   const agregarDeuda = async () => {
-    if (!currentUser) return;
+    if (!currentUser?.id) {
+      mostrarMensaje("No hay sesión activa.");
+      return;
+    }
 
     const nombre = nuevaDeuda.nombre.trim();
     const saldo = Number(nuevaDeuda.saldo);
 
-    if (!nombre || saldo < 0 || Number.isNaN(saldo)) {
+    if (!nombre || Number.isNaN(saldo) || saldo < 0) {
       mostrarMensaje("Completa bien la deuda.");
       return;
     }
 
-    const { error } = await supabase.from("deudas").insert({
-      user_id: currentUser.id,
-      nombre,
-      saldo,
-    });
+    const { data, error } = await supabase
+      .from("deudas")
+      .insert([
+        {
+          user_id: currentUser.id,
+          nombre,
+          saldo,
+        },
+      ])
+      .select();
+
+    console.log("DEUDA", { data, error });
 
     if (error) {
-      mostrarMensaje(error.message);
+      mostrarMensaje(`Error deuda: ${error.message}`);
       return;
     }
 
@@ -486,24 +512,34 @@ useEffect(() => {
   };
 
   const agregarPresupuesto = async () => {
-    if (!currentUser) return;
+    if (!currentUser?.id) {
+      mostrarMensaje("No hay sesión activa.");
+      return;
+    }
 
     const categoria = nuevoPresupuesto.categoria.trim();
     const limite = Number(nuevoPresupuesto.limite);
 
-    if (!categoria || limite <= 0 || Number.isNaN(limite)) {
+    if (!categoria || Number.isNaN(limite) || limite <= 0) {
       mostrarMensaje("Completa bien el presupuesto.");
       return;
     }
 
-    const { error } = await supabase.from("presupuestos").insert({
-      user_id: currentUser.id,
-      categoria,
-      limite,
-    });
+    const { data, error } = await supabase
+      .from("presupuestos")
+      .insert([
+        {
+          user_id: currentUser.id,
+          categoria,
+          limite,
+        },
+      ])
+      .select();
+
+    console.log("PRESUPUESTO", { data, error });
 
     if (error) {
-      mostrarMensaje(error.message);
+      mostrarMensaje(`Error presupuesto: ${error.message}`);
       return;
     }
 
@@ -562,7 +598,7 @@ useEffect(() => {
             valor={formatoMoneda(balance)}
             color={balance >= 0 ? "text-emerald-600" : "text-red-600"}
           />
-          <TarjetaResumen titulo="Saldo en cuentas" value={formatoMoneda(totalCuentas)} />
+          <TarjetaResumen titulo="Saldo en cuentas" valor={formatoMoneda(totalCuentas)} />
         </div>
 
         <div className="grid gap-6 xl:grid-cols-2">
