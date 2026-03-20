@@ -176,7 +176,7 @@ export default function App() {
 
   const mostrarMensaje = (texto) => {
     setMensaje(texto);
-    setTimeout(() => setMensaje(""), 2500);
+    setTimeout(() => setMensaje(""), 3000);
   };
 
   const mostrarMensajeAuth = (texto) => {
@@ -193,15 +193,15 @@ export default function App() {
     setPresupuestos([]);
   };
 
-  const cargarDatosUsuario = async (userId, fallbackUser = null) => {
+  const recargarTablas = async (userId) => {
     const [
-      { data: profile },
-      { data: ingresosData, error: ingresosError },
-      { data: gastosData, error: gastosError },
-      { data: cuentasData, error: cuentasError },
-      { data: deudasData, error: deudasError },
-      { data: presupuestosData, error: presupuestosError },
-    ] = await Promise.all([
+      profileRes,
+      ingresosRes,
+      gastosRes,
+      cuentasRes,
+      deudasRes,
+      presupuestosRes,
+    ] = await Promise.allSettled([
       supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
       supabase.from("ingresos").select("*").eq("user_id", userId).order("id", { ascending: false }),
       supabase.from("gastos").select("*").eq("user_id", userId).order("id", { ascending: false }),
@@ -214,21 +214,23 @@ export default function App() {
         .order("id", { ascending: false }),
     ]);
 
-    if (ingresosError || gastosError || cuentasError || deudasError || presupuestosError) {
-      console.error({
-        ingresosError,
-        gastosError,
-        cuentasError,
-        deudasError,
-        presupuestosError,
-      });
-    }
+    const profile = profileRes.status === "fulfilled" ? profileRes.value.data : null;
+    const ingresosData = ingresosRes.status === "fulfilled" ? ingresosRes.value.data : [];
+    const gastosData = gastosRes.status === "fulfilled" ? gastosRes.value.data : [];
+    const cuentasData = cuentasRes.status === "fulfilled" ? cuentasRes.value.data : [];
+    const deudasData = deudasRes.status === "fulfilled" ? deudasRes.value.data : [];
+    const presupuestosData =
+      presupuestosRes.status === "fulfilled" ? presupuestosRes.value.data : [];
 
-    setCurrentUser({
-      id: userId,
-      nombre: profile?.nombre || fallbackUser?.user_metadata?.nombre || fallbackUser?.email || "",
-      email: profile?.email || fallbackUser?.email || "",
-    });
+    setCurrentUser((prev) =>
+      prev
+        ? {
+            ...prev,
+            nombre: profile?.nombre || prev.nombre,
+            email: profile?.email || prev.email,
+          }
+        : prev
+    );
 
     setIngresos(ingresosData || []);
     setGastos(gastosData || []);
@@ -250,7 +252,11 @@ export default function App() {
       const session = data?.session;
 
       if (session?.user) {
-        await cargarDatosUsuario(session.user.id, session.user);
+        setCurrentUser({
+          id: session.user.id,
+          nombre: session.user.user_metadata?.nombre || session.user.email || "",
+          email: session.user.email || "",
+        });
       } else {
         limpiarDatos();
       }
@@ -258,9 +264,13 @@ export default function App() {
 
     iniciar();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        await cargarDatosUsuario(session.user.id, session.user);
+        setCurrentUser({
+          id: session.user.id,
+          nombre: session.user.user_metadata?.nombre || session.user.email || "",
+          email: session.user.email || "",
+        });
       } else {
         limpiarDatos();
       }
@@ -270,6 +280,11 @@ export default function App() {
       authListener.subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    recargarTablas(currentUser.id);
+  }, [currentUser?.id]);
 
   const totalIngresos = useMemo(
     () => ingresos.reduce((acc, item) => acc + (Number(item.monto) || 0), 0),
@@ -340,13 +355,20 @@ export default function App() {
       password,
     });
 
+    console.log("LOGIN DATA:", data);
+    console.log("LOGIN ERROR:", error);
+
     if (error) {
       mostrarMensajeAuth(error.message);
       return;
     }
 
     if (data?.user) {
-      await cargarDatosUsuario(data.user.id, data.user);
+      setCurrentUser({
+        id: data.user.id,
+        nombre: data.user.user_metadata?.nombre || data.user.email || "",
+        email: data.user.email || "",
+      });
       setLoginForm(LOGIN_VACIO);
       mostrarMensajeAuth("");
     }
@@ -390,7 +412,7 @@ export default function App() {
       return;
     }
 
-    await cargarDatosUsuario(currentUser.id, currentUser);
+    await recargarTablas(currentUser.id);
     setNuevoIngreso(INGRESO_VACIO);
     mostrarMensaje("Ingreso agregado correctamente.");
   };
@@ -430,7 +452,7 @@ export default function App() {
       return;
     }
 
-    await cargarDatosUsuario(currentUser.id, currentUser);
+    await recargarTablas(currentUser.id);
     setNuevoGasto(GASTO_VACIO);
     mostrarMensaje("Gasto agregado correctamente.");
   };
@@ -469,7 +491,7 @@ export default function App() {
       return;
     }
 
-    await cargarDatosUsuario(currentUser.id, currentUser);
+    await recargarTablas(currentUser.id);
     setNuevaCuenta(CUENTA_VACIA);
     mostrarMensaje("Cuenta agregada correctamente.");
   };
@@ -506,7 +528,7 @@ export default function App() {
       return;
     }
 
-    await cargarDatosUsuario(currentUser.id, currentUser);
+    await recargarTablas(currentUser.id);
     setNuevaDeuda(DEUDA_VACIA);
     mostrarMensaje("Deuda agregada correctamente.");
   };
@@ -543,7 +565,7 @@ export default function App() {
       return;
     }
 
-    await cargarDatosUsuario(currentUser.id, currentUser);
+    await recargarTablas(currentUser.id);
     setNuevoPresupuesto(PRESUPUESTO_VACIO);
     mostrarMensaje("Presupuesto agregado correctamente.");
   };
