@@ -146,7 +146,7 @@ function Sidebar({ seccionActiva, setSeccionActiva, onCerrarSesion, currentUser 
           <p className="text-xs uppercase tracking-[0.25em] text-slate-400">NIDO</p>
           <h1 className="mt-3 text-2xl font-bold">Financiero</h1>
           <p className="mt-2 text-sm text-slate-400">
-            Panel bancario por secciones para administrar tu dinero.
+            Panel de control financiero con estilo bancario.
           </p>
         </div>
 
@@ -813,11 +813,11 @@ export default function App() {
             </ResponsiveContainer>
           </div>
         ) : (
-          <EstadoVacio texto="Aún no hay datos suficientes para la gráfica de categorías." />
+          <EstadoVacio texto="Aún no hay gastos suficientes para mostrar esta gráfica." />
         )}
       </Panel>
 
-      <Panel titulo="Comparativo financiero" descripcion="Resumen visual de ingresos, gastos, cuentas y deudas.">
+      <Panel titulo="Comparativo financiero" descripcion="Resumen visual de tus cifras principales.">
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={datosGraficaResumen}>
@@ -826,7 +826,7 @@ export default function App() {
               <YAxis />
               <Tooltip formatter={(value) => formatoMoneda(value)} />
               <Legend />
-              <Bar dataKey="valor" radius={[10, 10, 0, 0]} />
+              <Bar dataKey="valor" radius={[10, 10, 0, 0]} fill="#0f172a" />
             </BarChart>
           </ResponsiveContainer>
         </div>
