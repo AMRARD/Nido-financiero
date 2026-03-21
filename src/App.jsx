@@ -24,12 +24,24 @@ const REGISTRO_VACIO = {
   confirmarPassword: "",
 };
 
-const INGRESO_VACIO = { descripcion: "", monto: "", fecha: HOY };
-const GASTO_VACIO = { descripcion: "", monto: "", categoria: "General", fecha: HOY };
+const INGRESO_VACIO = { descripcion: "", monto: "", fecha: HOY, cuentaId: "" };
+const GASTO_VACIO = {
+  descripcion: "",
+  monto: "",
+  categoria: "General",
+  fecha: HOY,
+  cuentaId: "",
+};
 const CUENTA_VACIA = { nombre: "", tipo: "Banco", saldo: "" };
 const DEUDA_VACIA = { nombre: "", saldo: "" };
 const PRESUPUESTO_VACIO = { categoria: "", limite: "" };
-const PAGO_DEUDA_VACIO = { cuentaId: "", deudaId: "", monto: "" };
+const PAGO_DEUDA_VACIO = {
+  cuentaId: "",
+  deudaId: "",
+  monto: "",
+  fecha: HOY,
+  descripcion: "",
+};
 
 const SECCIONES = [
   { id: "resumen", label: "Resumen" },
@@ -146,7 +158,7 @@ function Sidebar({ seccionActiva, setSeccionActiva, onCerrarSesion, currentUser 
           <p className="text-xs uppercase tracking-[0.25em] text-slate-400">NIDO</p>
           <h1 className="mt-3 text-2xl font-bold">Financiero</h1>
           <p className="mt-2 text-sm text-slate-400">
-            Panel de control financiero con estilo bancario.
+            Panel bancario con cuentas, deudas, gráficos y presupuestos.
           </p>
         </div>
 
@@ -292,6 +304,7 @@ export default function App() {
   const [cuentas, setCuentas] = useState([]);
   const [deudas, setDeudas] = useState([]);
   const [presupuestos, setPresupuestos] = useState([]);
+  const [pagosDeudas, setPagosDeudas] = useState([]);
 
   const [nuevoIngreso, setNuevoIngreso] = useState(INGRESO_VACIO);
   const [nuevoGasto, setNuevoGasto] = useState(GASTO_VACIO);
@@ -317,6 +330,7 @@ export default function App() {
     setCuentas([]);
     setDeudas([]);
     setPresupuestos([]);
+    setPagosDeudas([]);
     setSeccionActiva("resumen");
   };
 
@@ -328,6 +342,7 @@ export default function App() {
       cuentasRes,
       deudasRes,
       presupuestosRes,
+      pagosDeudasRes,
     ] = await Promise.allSettled([
       supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
       supabase.from("ingresos").select("*").eq("user_id", userId).order("id", { ascending: false }),
@@ -336,6 +351,11 @@ export default function App() {
       supabase.from("deudas").select("*").eq("user_id", userId).order("id", { ascending: false }),
       supabase
         .from("presupuestos")
+        .select("*")
+        .eq("user_id", userId)
+        .order("id", { ascending: false }),
+      supabase
+        .from("pagos_deudas")
         .select("*")
         .eq("user_id", userId)
         .order("id", { ascending: false }),
@@ -348,6 +368,8 @@ export default function App() {
     const deudasData = deudasRes.status === "fulfilled" ? deudasRes.value.data : [];
     const presupuestosData =
       presupuestosRes.status === "fulfilled" ? presupuestosRes.value.data : [];
+    const pagosDeudasData =
+      pagosDeudasRes.status === "fulfilled" ? pagosDeudasRes.value.data : [];
 
     setCurrentUser((prev) =>
       prev
@@ -364,6 +386,7 @@ export default function App() {
     setCuentas(cuentasData || []);
     setDeudas(deudasData || []);
     setPresupuestos(presupuestosData || []);
+    setPagosDeudas(pagosDeudasData || []);
   };
 
   useEffect(() => {
@@ -571,20 +594,19 @@ export default function App() {
 
     const descripcion = nuevoIngreso.descripcion.trim();
     const monto = Number(nuevoIngreso.monto);
+    const cuentaId = Number(nuevoIngreso.cuentaId);
 
-    if (!descripcion || Number.isNaN(monto) || monto <= 0) {
+    if (!cuentaId || !descripcion || Number.isNaN(monto) || monto <= 0) {
       mostrarMensaje("Completa bien el ingreso.");
       return;
     }
 
-    const { error } = await supabase.from("ingresos").insert([
-      {
-        user_id: currentUser.id,
-        descripcion,
-        monto,
-        fecha: nuevoIngreso.fecha || HOY,
-      },
-    ]);
+    const { error } = await supabase.rpc("registrar_ingreso", {
+      p_cuenta_id: cuentaId,
+      p_descripcion: descripcion,
+      p_monto: monto,
+      p_fecha: nuevoIngreso.fecha || HOY,
+    });
 
     if (error) {
       mostrarMensaje(`Error ingreso: ${error.message}`);
@@ -605,21 +627,20 @@ export default function App() {
     const descripcion = nuevoGasto.descripcion.trim();
     const monto = Number(nuevoGasto.monto);
     const categoria = nuevoGasto.categoria.trim() || "General";
+    const cuentaId = Number(nuevoGasto.cuentaId);
 
-    if (!descripcion || Number.isNaN(monto) || monto <= 0) {
+    if (!cuentaId || !descripcion || Number.isNaN(monto) || monto <= 0) {
       mostrarMensaje("Completa bien el gasto.");
       return;
     }
 
-    const { error } = await supabase.from("gastos").insert([
-      {
-        user_id: currentUser.id,
-        descripcion,
-        monto,
-        categoria,
-        fecha: nuevoGasto.fecha || HOY,
-      },
-    ]);
+    const { error } = await supabase.rpc("registrar_gasto", {
+      p_cuenta_id: cuentaId,
+      p_descripcion: descripcion,
+      p_categoria: categoria,
+      p_monto: monto,
+      p_fecha: nuevoGasto.fecha || HOY,
+    });
 
     if (error) {
       mostrarMensaje(`Error gasto: ${error.message}`);
@@ -738,50 +759,23 @@ export default function App() {
     const cuentaId = Number(pagoDeuda.cuentaId);
     const deudaId = Number(pagoDeuda.deudaId);
     const monto = Number(pagoDeuda.monto);
+    const descripcion = (pagoDeuda.descripcion || "").trim();
 
     if (!cuentaId || !deudaId || Number.isNaN(monto) || monto <= 0) {
       mostrarMensaje("Completa correctamente el pago de deuda.");
       return;
     }
 
-    const cuenta = cuentas.find((c) => Number(c.id) === cuentaId);
-    const deuda = deudas.find((d) => Number(d.id) === deudaId);
+    const { error } = await supabase.rpc("pagar_deuda", {
+      p_cuenta_id: cuentaId,
+      p_deuda_id: deudaId,
+      p_monto: monto,
+      p_fecha: pagoDeuda.fecha || HOY,
+      p_descripcion: descripcion || "Pago de deuda",
+    });
 
-    if (!cuenta || !deuda) {
-      mostrarMensaje("Selecciona una cuenta y una deuda válidas.");
-      return;
-    }
-
-    const saldoCuenta = Number(cuenta.saldo) || 0;
-    const saldoDeuda = Number(deuda.saldo) || 0;
-
-    if (saldoCuenta < monto) {
-      mostrarMensaje("La cuenta no tiene fondos suficientes.");
-      return;
-    }
-
-    const nuevoSaldoCuenta = saldoCuenta - monto;
-    const nuevoSaldoDeuda = Math.max(0, saldoDeuda - monto);
-
-    const { error: errorCuenta } = await supabase
-      .from("cuentas")
-      .update({ saldo: nuevoSaldoCuenta })
-      .eq("id", cuentaId)
-      .eq("user_id", currentUser.id);
-
-    if (errorCuenta) {
-      mostrarMensaje(`Error al debitar cuenta: ${errorCuenta.message}`);
-      return;
-    }
-
-    const { error: errorDeuda } = await supabase
-      .from("deudas")
-      .update({ saldo: nuevoSaldoDeuda })
-      .eq("id", deudaId)
-      .eq("user_id", currentUser.id);
-
-    if (errorDeuda) {
-      mostrarMensaje(`Error al acreditar deuda: ${errorDeuda.message}`);
+    if (error) {
+      mostrarMensaje(`Error pago deuda: ${error.message}`);
       return;
     }
 
@@ -792,7 +786,10 @@ export default function App() {
 
   const renderGraficas = () => (
     <div className="grid gap-6 xl:grid-cols-2">
-      <Panel titulo="Distribución de gastos por categoría" descripcion="Vista gráfica de tus categorías de gasto.">
+      <Panel
+        titulo="Distribución de gastos por categoría"
+        descripcion="Vista gráfica de tus categorías de gasto."
+      >
         {datosGraficaCategorias.length ? (
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
@@ -817,7 +814,10 @@ export default function App() {
         )}
       </Panel>
 
-      <Panel titulo="Comparativo financiero" descripcion="Resumen visual de tus cifras principales.">
+      <Panel
+        titulo="Comparativo financiero"
+        descripcion="Resumen visual de tus cifras principales."
+      >
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={datosGraficaResumen}>
@@ -880,8 +880,23 @@ export default function App() {
 
   const renderIngresos = () => (
     <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-      <Panel titulo="Nuevo ingreso" descripcion="Registra una entrada de dinero.">
+      <Panel
+        titulo="Nuevo ingreso"
+        descripcion="Registra una entrada de dinero y elige a qué cuenta entró."
+      >
         <div className="grid gap-3">
+          <Select
+            value={nuevoIngreso.cuentaId}
+            onChange={(e) => setNuevoIngreso((prev) => ({ ...prev, cuentaId: e.target.value }))}
+          >
+            <option value="">Selecciona cuenta de entrada</option>
+            {cuentas.map((cuenta) => (
+              <option key={cuenta.id} value={cuenta.id}>
+                {cuenta.nombre}
+              </option>
+            ))}
+          </Select>
+
           <Campo
             placeholder="Descripción"
             value={nuevoIngreso.descripcion}
@@ -905,14 +920,17 @@ export default function App() {
       <Panel titulo="Historial de ingresos" descripcion="Tus ingresos registrados más recientes.">
         {ingresos.length ? (
           <div className="space-y-3">
-            {ingresos.map((item) => (
-              <ItemLista
-                key={item.id}
-                titulo={item.descripcion}
-                subtitulo={formatoFecha(item.fecha)}
-                valor={formatoMoneda(item.monto)}
-              />
-            ))}
+            {ingresos.map((item) => {
+              const cuenta = cuentas.find((c) => Number(c.id) === Number(item.cuenta_id));
+              return (
+                <ItemLista
+                  key={item.id}
+                  titulo={item.descripcion}
+                  subtitulo={`${formatoFecha(item.fecha)} · ${cuenta?.nombre || "Sin cuenta"}`}
+                  valor={formatoMoneda(item.monto)}
+                />
+              );
+            })}
           </div>
         ) : (
           <EstadoVacio texto="No hay ingresos registrados." />
@@ -923,8 +941,23 @@ export default function App() {
 
   const renderGastos = () => (
     <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-      <Panel titulo="Nuevo gasto" descripcion="Registra una salida de dinero.">
+      <Panel
+        titulo="Nuevo gasto"
+        descripcion="Registra un gasto y elige de qué cuenta salió."
+      >
         <div className="grid gap-3">
+          <Select
+            value={nuevoGasto.cuentaId}
+            onChange={(e) => setNuevoGasto((prev) => ({ ...prev, cuentaId: e.target.value }))}
+          >
+            <option value="">Selecciona cuenta de salida</option>
+            {cuentas.map((cuenta) => (
+              <option key={cuenta.id} value={cuenta.id}>
+                {cuenta.nombre}
+              </option>
+            ))}
+          </Select>
+
           <Campo
             placeholder="Descripción"
             value={nuevoGasto.descripcion}
@@ -953,14 +986,17 @@ export default function App() {
       <Panel titulo="Historial de gastos" descripcion="Tus gastos registrados más recientes.">
         {gastos.length ? (
           <div className="space-y-3">
-            {gastos.map((item) => (
-              <ItemLista
-                key={item.id}
-                titulo={item.descripcion}
-                subtitulo={`${item.categoria} · ${formatoFecha(item.fecha)}`}
-                valor={formatoMoneda(item.monto)}
-              />
-            ))}
+            {gastos.map((item) => {
+              const cuenta = cuentas.find((c) => Number(c.id) === Number(item.cuenta_id));
+              return (
+                <ItemLista
+                  key={item.id}
+                  titulo={item.descripcion}
+                  subtitulo={`${item.categoria} · ${formatoFecha(item.fecha)} · ${cuenta?.nombre || "Sin cuenta"}`}
+                  valor={formatoMoneda(item.monto)}
+                />
+              );
+            })}
           </div>
         ) : (
           <EstadoVacio texto="No hay gastos registrados." />
@@ -1050,13 +1086,16 @@ export default function App() {
         </Panel>
       </div>
 
-      <Panel titulo="Debitar deuda desde una cuenta" descripcion="Descuenta dinero de una cuenta y reduce el saldo de una deuda.">
-        <div className="grid gap-3 md:grid-cols-3">
+      <Panel
+        titulo="Pago de deuda"
+        descripcion="Selecciona de qué cuenta sale el dinero y a qué deuda se aplica."
+      >
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <Select
             value={pagoDeuda.cuentaId}
             onChange={(e) => setPagoDeuda((prev) => ({ ...prev, cuentaId: e.target.value }))}
           >
-            <option value="">Selecciona cuenta</option>
+            <option value="">Cuenta de salida</option>
             {cuentas.map((cuenta) => (
               <option key={cuenta.id} value={cuenta.id}>
                 {cuenta.nombre}
@@ -1068,7 +1107,7 @@ export default function App() {
             value={pagoDeuda.deudaId}
             onChange={(e) => setPagoDeuda((prev) => ({ ...prev, deudaId: e.target.value }))}
           >
-            <option value="">Selecciona deuda</option>
+            <option value="">Deuda a pagar</option>
             {deudas.map((deuda) => (
               <option key={deuda.id} value={deuda.id}>
                 {deuda.nombre}
@@ -1078,15 +1117,50 @@ export default function App() {
 
           <Campo
             type="number"
-            placeholder="Monto a pagar"
+            placeholder="Monto"
             value={pagoDeuda.monto}
             onChange={(e) => setPagoDeuda((prev) => ({ ...prev, monto: e.target.value }))}
           />
+
+          <Campo
+            type="date"
+            value={pagoDeuda.fecha}
+            onChange={(e) => setPagoDeuda((prev) => ({ ...prev, fecha: e.target.value || HOY }))}
+          />
         </div>
+
+        <Campo
+          className="mt-3"
+          placeholder="Descripción opcional"
+          value={pagoDeuda.descripcion}
+          onChange={(e) => setPagoDeuda((prev) => ({ ...prev, descripcion: e.target.value }))}
+        />
 
         <BotonPrimario className="mt-4" onClick={pagarDeudaDesdeCuenta}>
           Aplicar pago de deuda
         </BotonPrimario>
+      </Panel>
+
+      <Panel titulo="Historial de pagos de deuda" descripcion="Pagos realizados desde tus cuentas.">
+        {pagosDeudas.length ? (
+          <div className="space-y-3">
+            {pagosDeudas.map((item) => {
+              const cuenta = cuentas.find((c) => Number(c.id) === Number(item.cuenta_id));
+              const deuda = deudas.find((d) => Number(d.id) === Number(item.deuda_id));
+
+              return (
+                <ItemLista
+                  key={item.id}
+                  titulo={item.descripcion || "Pago de deuda"}
+                  subtitulo={`${deuda?.nombre || "Deuda"} · ${cuenta?.nombre || "Cuenta"} · ${formatoFecha(item.fecha)}`}
+                  valor={formatoMoneda(item.monto)}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <EstadoVacio texto="No hay pagos de deuda registrados." />
+        )}
       </Panel>
     </div>
   );
